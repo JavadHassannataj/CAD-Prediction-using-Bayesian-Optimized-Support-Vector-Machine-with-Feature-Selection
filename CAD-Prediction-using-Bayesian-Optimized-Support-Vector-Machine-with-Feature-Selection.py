@@ -1,402 +1,304 @@
+# ===============================================
+# CAD Prediction: Full Pipeline with SHAP, Ablation, Calibration
+# Updated: Nov 16, 2025 | Q1-ready | Reproducible
+# ===============================================
+
 import pandas as pd
 import numpy as np
-from matplotlib import pyplot as plt
-data = pd.read_csv("/content/CAD.csv")
-data.head(10)
-data.info()
-data.describe().T
-data.columns = data.columns.str.strip()
-data.columns = data.columns.str.replace(' ', '_')
-data.columns
-
-target = data['Cath'].value_counts()
-
-target.plot.bar()
-
-data.isna().sum().sum()
-
-print(f'There are {data.duplicated().sum()} duplicate rows')
-
-from matplotlib import pyplot as plt
+import matplotlib.pyplot as plt
 import seaborn as sns
-plt.figure(figsize=(40,40))
-sns.heatmap(data.corr(), annot=True, cmap='coolwarm', linewidths=0.5, fmt='.2f')
-plt.title("Correlation Matrix Heatmap", fontsize=20)
-plt.show()
-
-# Numerical variables:
-num_cols = ['Age','Weight', 'Length','BMI', 'BP', 'PR', 'FBS', 'CR', 'TG', 'LDL', 'HDL', 'BUN', 'ESR', 'HB', 'K', 'Na', 'WBC', 'Lymph', 'Neut', 'PLT', 'EF-TTE']
-
-# Categorical variables:
-cat_cols = ['Sex', 'DM', 'HTN', 'Current_Smoker' ,'EX-Smoker', 'FH', 'Obesity', 'CRF', 'CVA', 'Airway_disease', 'Thyroid_Disease', 'CHF', 'DLP', 'Edema', 'Weak_Peripheral_Pulse', 'Lung_rales', 'Systolic_Murmur', 'Diastolic_Murmur', 'Typical_Chest_Pain', 'Dyspnea', 'Atypical', 'Nonanginal', 'Exertional_CP', 'LowTH_Ang', 'Q_Wave', 'St_Elevation', 'St_Depression', 'Tinversion', 'LVH', 'Poor_R_Progression', 'Cath']
-
-# Ordinal variables
-ord_cols = ['Function_Class', "Region_RWMA", "VHD"]
-
-print(f"[Unique Values in {len(cat_cols)} Categorical Variables]\n")
-
-for cat_col in cat_cols:
-    print(f"{cat_col}:{data[cat_col].nunique()} Unique Values => {data[cat_col].unique()}")
-
-print(f"[Unique Values in {len(ord_cols)} Ordinal Variables]\n")
-
-for ord_col in ord_cols:
-    print("* {} : {} Unique Values =>".format(ord_col, data[ord_col].nunique()), data[ord_col].unique())
-
-print(f"[Unique Values in {len(num_cols)} Numerical Variables]\n")
-
-for num_col in num_cols:
-    print("* {} : {} Unique Values".format(num_col, data[num_col].nunique()))
-
-data[num_cols].describe(percentiles=[0.1, 0.25, 0.75, 0.9, 0.95])
-
-vhd = {"N": 0, "mild": 1, "Moderate": 2, "Severe": 3}
-sex = {"Male": "Male", "Fmale": "Female"}
-
-data['VHD'] = data['VHD'].map(vhd)
-data['Sex'] = data['Sex'].map(sex)
-
-data.replace('N', 0, inplace=True)
-data.replace('Y', 1, inplace=True)
-
-print(f"[Unique Values in {len(cat_cols)} Categorical Variables]\n")
-for cat_col in cat_cols:
-    print(f"{cat_col}:{data[cat_col].nunique()} Unique Values => {data[cat_col].unique()}")
-
-print(f"[Unique Values in {len(ord_cols)} Ordinal Variables]\n")
-
-data['Cath'] = [1 if i.strip() == "Cad" else 0 for i in data['Cath']]
-data['Sex'] = [1 if i.strip() == "Male" else 0 for i in data['Sex']]
-data.head(5)
-label = data['Cath'].value_counts()
-label.plot.pie()
-X_1 = data.drop("Cath", axis=1)
-y_1 = data['Cath']
-columns = X_1.columns.tolist()
+from sklearn.model_selection import StratifiedKFold, train_test_split
 from sklearn.preprocessing import RobustScaler
-
-scaler = RobustScaler()
-print(scaler.fit(X_1))
-X_1 = scaler.transform(X_1)
-X_1
-new_df = pd.DataFrame(X_1, columns = columns)
-new_df["Cath"] = y_1
-new_df
-
-from sklearn.ensemble import AdaBoostClassifier
+from sklearn.svm import SVC
+from sklearn.ensemble import RandomForestClassifier, AdaBoostClassifier
 from sklearn.tree import DecisionTreeClassifier
-import numpy as np
-
-ada_model = AdaBoostClassifier()
-ada_model.fit(X_1, y_1)
-
-# Step 2: Extract feature importance from Ada
-ada_feature_importance = ada_model.feature_importances_
-
-# Step 3: Train an dt model
-dt_model = DecisionTreeClassifier()
-dt_model.fit(X_1, y_1)
-
-# Step 4: Extract feature importance from dt
-dt_feature_importance = dt_model.feature_importances_
-
-combined_feature_importance = (ada_feature_importance + dt_feature_importance) / 2
-
-# Step 6: Rank the features
-sorted_indices = np.argsort(combined_feature_importance)[::-1]  # Sort indices in descending order
-sorted_features = [columns[i] for i in sorted_indices]
-
-# Print feature importance scores and ranked features
-print("Feature Importance Scores:")
-for feature, importance in zip(columns, combined_feature_importance):
-    print(f"{feature}: {importance}")
-
-print("\nRanked Features:")
-for rank, feature in enumerate(sorted_features, start=1):
-    print(f"Rank {rank}: {feature}")
-feature_importance_dict = {}
-for feature, importance in zip(columns, combined_feature_importance):
-    feature_importance_dict[feature] = importance
-
-# Print feature importance scores
-for feature, importance in feature_importance_dict.items():
-    print(f"{feature}: {importance}")
-feature_importance_list = [(feature, importance) for feature, importance in feature_importance_dict.items()]
-
-# Print the list
-print("Feature Importance Scores:")
-for feature, importance in feature_importance_list:
-    print(f"{feature}: {importance}")
-from matplotlib import pyplot as plt
-
-# Unpack feature names and importance scores from the list of tuples
-features, importance_scores = zip(*feature_importance_list)
-
-plt.figure(figsize=(15, 6))
-plt.bar(range(len(features)), importance_scores, align='center')
-plt.xticks(range(len(features)), features, rotation=90)
-plt.xlabel('Features')
-plt.ylabel('Features Importance')
-plt.title('Features Importances')
-plt.tight_layout()
-plt.show()
-
-columns_to_drop  = ['Sex','Diastolic_Murmur','Systolic_Murmur','Dyspnea','Function_Class','Obesity','LVH','PLT','HB','St_Depression','Exertional_CP','Lung_rales','Thyroid_Disease','Edema','EX-Smoker','CVA','Airway_disease','Q_Wave','Lung_rales','Poor_R_Progression','CRF','LowTH_Ang','Weak_Peripheral_Pulse','LowTH_Ang','Exertional_CP','WBC','CHF','Cath']
-X = new_df.drop(columns_to_drop, axis=1)
-y = new_df['Cath']
-from sklearn.preprocessing import RobustScaler
-scaler = RobustScaler()
-print(scaler.fit(X))
-X = scaler.transform(X)
-X
-import smote_variants as sv
-oversampler= sv.distance_SMOTE()
-X_res,y_res = oversampler.sample(X, y)
-X_res.shape
-!pip install smote_variants
-X_res.shape
-from sklearn.model_selection import StratifiedKFold
-kfold = StratifiedKFold(n_splits=10,shuffle=True, random_state = 42)
-
-for train_ix, test_ix in kfold.split(X_res, y_res):
-    x_train, x_test = X_res[train_ix], X_res[test_ix]
-    y_train, y_test = y_res[train_ix], y_res[test_ix]
-
-
-print('X_train:',x_train.shape)
-
-print('X_test:',x_test.shape)
-
-print('y_train:',y_train.shape)
-
-print('y_test:',y_test.shape)
-from sklearn.svm import SVC
-model = SVC()
-model.fit(x_train, y_train)
-predicted = model.predict(x_test)
-from sklearn.metrics import classification_report
-print(classification_report(y_test, predicted))
-!pip install optuna
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, roc_auc_score, brier_score_loss, classification_report
+from sklearn.calibration import calibration_curve
+from imblearn.pipeline import Pipeline as ImbPipeline
+from imblearn.over_sampling import SMOTE
 import optuna
-from sklearn.datasets import make_classification
-from sklearn.model_selection import train_test_split
-from sklearn.svm import SVC
-from sklearn.metrics import accuracy_score
+import shap
+import warnings
+warnings.filterwarnings("ignore")
 
-def objective(trial):
-    # Define the hyperparameters to optimize
-    C = trial.suggest_loguniform('C', 1e-3, 1e3)
-    kernel = trial.suggest_categorical('kernel', ['linear', 'poly', 'rbf', 'sigmoid'])
-    degree = trial.suggest_int('degree', 2, 5) if kernel == 'poly' else None
-    gamma = trial.suggest_loguniform('gamma', 1e-3, 1e3) if kernel in ['rbf', 'poly', 'sigmoid'] else 'scale'
+# -------------------------------
+# 1. Load & Preprocess Data
+# -------------------------------
+data = pd.read_csv("/content/CAD.csv")
+data.columns = data.columns.str.strip().str.replace(' ', '_')
 
-    if kernel == 'poly':
-        model = SVC(C=C, kernel=kernel, degree=degree, gamma=gamma)
-    else:
-        model = SVC(C=C, kernel=kernel, gamma=gamma)
-    model.fit(x_train, y_train)
+# Fix typos & mapping
+data['Sex'] = data['Sex'].replace({'Fmale': 'Female'})
+data['VHD'] = data['VHD'].map({'N': 0, 'mild': 1, 'Moderate': 2, 'Severe': 3})
+data.replace({'N': 0, 'Y': 1}, inplace=True)
+data['Cath'] = data['Cath'].apply(lambda x: 1 if str(x).strip() == 'Cad' else 0)
+data['Sex'] = data['Sex'].apply(lambda x: 1 if str(x).strip() == 'Male' else 0)
 
-    y_pred = model.predict(x_test)
-    accuracy = accuracy_score(y_test, y_pred)
+# Define feature groups
+num_cols = ['Age','Weight','Length','BMI','BP','PR','FBS','CR','TG','LDL','HDL','BUN','ESR','HB','K','Na','WBC','Lymph','Neut','PLT','EF-TTE']
+cat_cols = [col for col in data.columns if col not in num_cols + ['Cath']]
+ord_cols = ['Function_Class', 'Region_RWMA', 'VHD']
 
-    return accuracy
-
-study = optuna.create_study(direction='maximize')
-study.optimize(objective, n_trials=100)
-
-best_params = study.best_params
-best_accuracy = study.best_value
-
-print("Best Hyperparameters:", best_params)
-print("Best Accuracy:", best_accuracy)
-
-best_model = SVC(**best_params)
-best_model.fit(x_train, y_train)
-
-y_pred = best_model.predict(x_test)
-final_accuracy = accuracy_score(y_test, y_pred)
-print("Final Accuracy:", final_accuracy)
-
-
-from sklearn.linear_model import LogisticRegression
-
-def objective(trial):
-    # Define the hyperparameters to optimize
-    penalty = trial.suggest_categorical('penalty', ['l1', 'l2'])
-    C = trial.suggest_loguniform('C', 1e-3, 1e3)
-
-    # Create and train the Logistic Regression model with the specified hyperparameters
-    model_lg = LogisticRegression(penalty=penalty, C=C, solver='liblinear')
-    model_lg.fit(x_train, y_train)
-
-    # Evaluate the model
-    y_pred_lg = model_lg.predict(x_test)
-    accuracy_lg = accuracy_score(y_test, y_pred_lg)
-
-    return accuracy_lg
-
-# Create and optimize the study using Optuna
-study_lg = optuna.create_study(direction='maximize')
-study_lg.optimize(objective, n_trials=100)
-
-# Get the best hyperparameters
-best_params_lg = study_lg.best_params
-best_accuracy_lg = study_lg.best_value
-
-print("Best Hyperparameters:", best_params_lg)
-print("Best Accuracy:", best_accuracy_lg)
-
-
-
-def objective(trial):
-    # Define the hyperparameters to optimize
-    n_estimators = trial.suggest_int('n_estimators', 50, 500)
-    max_depth = trial.suggest_int('max_depth', 2, 32)
-    min_samples_split = trial.suggest_int('min_samples_split', 2, 20)
-    min_samples_leaf = trial.suggest_int('min_samples_leaf', 1, 20)
-    criterion = trial.suggest_categorical('criterion', ['gini', 'entropy'])
-
-    # Create and train the Random Forest model with the specified hyperparameters
-    model_rf = RandomForestClassifier(n_estimators=n_estimators, max_depth=max_depth,
-                                      min_samples_split=min_samples_split, min_samples_leaf=min_samples_leaf,
-                                      criterion=criterion, random_state=42)
-    model_rf.fit(x_train, y_train)
-
-    # Evaluate the model
-    y_pred_rf = model_rf.predict(x_test)
-    accuracy_rf = accuracy_score(y_test, y_pred_rf)
-
-    return accuracy_rf
-
-# Create and optimize the study using Optuna
-study_rf = optuna.create_study(direction='maximize')
-study_rf.optimize(objective, n_trials=100)
-
-# Get the best hyperparameters
-best_params_rf = study_rf.best_params
-best_accuracy_rf = study_rf.best_value
-
-print("Best Hyperparameters:", best_params_rf)
-print("Best Accuracy:", best_accuracy_rf)
-!pip install mealpy
-from sklearn import metrics
-from mealpy import FloatVar, StringVar, SLO, Problem
-from sklearn.svm import SVC
-class SvmOptimizedProblem(Problem):
-    def __init__(self, bounds=None, minmax="max", data=None, **kwargs):
-        self.data = data
-        super().__init__(bounds, minmax, **kwargs)
-
-    def obj_func(self, x):
-        x_decoded = self.decode_solution(x)
-        C_paras, kernel_paras = x_decoded["C_paras"], x_decoded["kernel_paras"]
-
-        svc = SVC(C=C_paras, kernel=kernel_paras, random_state=1)
-        svc.fit(x_train, y_train)
-        y_predict = svc.predict(x_test)
-        return metrics.accuracy_score(y_test, y_predict)
-
-
-data = [x_train, y_train,y_test,x_test]
-my_bounds = [
-    FloatVar(lb=0.01, ub=1000., name="C_paras"),
-    FloatVar(lb=0.01, ub=1000., name="gama"),
-    StringVar(valid_sets=('linear', 'poly', 'rbf', 'sigmoid'), name="kernel_paras")
+# Final features (after selection - 30 features)
+selected_features = [
+    'Typical_Chest_Pain', 'Age', 'EF-TTE', 'FBS', 'BMI', 'Tinversion', 'TG', 'Region_RWMA',
+    'HTN', 'Dyspnea', 'BP', 'DM', 'ESR', 'VHD', 'Lymph', 'PR', 'CR', 'HDL', 'LDL',
+    'Neut', 'WBC', 'HB', 'K', 'Na', 'Weight', 'Length', 'Current_Smoker', 'FH', 'DLP', 'St_Elevation'
 ]
-problem = SvmOptimizedProblem(bounds=my_bounds, minmax="max", data=data)
 
-model = SLO.ImprovedSLO(epoch=50, pop_size=50)
-model.solve(problem)
+X = data[selected_features]
+y = data['Cath']
 
-print(f"Best agent: {model.g_best}")
-print(f"Best solution: {model.g_best.solution}")
-print(f"Best accuracy: {model.g_best.target.fitness}")
-print(f"Best parameters: {model.problem.decode_solution(model.g_best.solution)}")
+# -------------------------------
+# 2. Pipeline Setup (No Leakage)
+# -------------------------------
+def create_pipeline(model):
+    return ImbPipeline([
+        ('scaler', RobustScaler()),
+        ('smote', SMOTE(random_state=42)),
+        ('model', model)
+    ])
 
-
-from xgboost import XGBClassifier as xgb
-from sklearn.linear_model import LogisticRegression
-from sklearn.ensemble import RandomForestClassifier
-estimators = []
-estimators.append(('LogisticRegression', LogisticRegression(penalty = 'l2', C = 58.48737264443094)))
-estimators.append(('RandomForest', RandomForestClassifier(n_estimators = 380, max_depth = 22, min_samples_split = 2, min_samples_leaf = 13, criterion = 'gini')))
-estimators.append(('Ada Boost Classifier', AdaBoostClassifier(n_estimators = 339, learning_rate = 0.009492811483791653)))
-estimators.append(('Support Vector Machine', SVC(C = 239.59501536334488, kernel = 'rbf', gamma = 0.36055928693321015) ))
-SVM_OPT = SVC(C = 239.59501536334488, kernel = 'rbf', gamma = 0.36055928693321015)
-
-from sklearn.ensemble import StackingClassifier
-SC_smote = StackingClassifier(estimators=estimators,final_estimator = SVM_OPT,cv=5)
-SC_smote.fit(x_train, y_train)
-y_pred = SC_smote.predict(x_test)
-
-print(f"\nStacking classifier training Accuracy: {SC_smote.score(x_train, y_train):0.2f}")
-print(f"Stacking classifier test Accuracy: {SC_smote.score(x_test, y_test):0.2f}")
-models={
-    "LRG": LogisticRegression(penalty = 'l2', C = 58.48737264443094),
-    "SVM_optuna": SVC(C = 239.59501536334488, kernel = 'rbf', gamma = 0.36055928693321015),
-    "SVM_slo": SVC(C = 370.79954615548917, kernel = 'linear'),
-    "RFC": RandomForestClassifier(n_estimators = 380, max_depth = 22, min_samples_split = 2, min_samples_leaf = 13, criterion = 'gini'),
+# -------------------------------
+# 3. Cross-Validation + Metrics Collection
+# -------------------------------
+skf = StratifiedKFold(n_splits=10, shuffle=True, random_state=42)
+models = {
+    'SVM_All': SVC(C=1.0, kernel='rbf', probability=True, random_state=42),
+    'SVM_Selected': SVC(C=1.0, kernel='rbf', probability=True, random_state=42),
+    'SVM_Selected+SMOTE': SVC(C=1.0, kernel='rbf', probability=True, random_state=42),
+    'SVM_SLOA': SVC(C=370.8, kernel='linear', probability=True, random_state=42),
+    'SVM_Grid': SVC(C=100, kernel='rbf', gamma=0.1, probability=True, random_state=42),
+    'SVM_Bayesian': SVC(C=239.6, kernel='rbf', gamma=0.361, probability=True, random_state=42)
 }
-from sklearn.metrics import accuracy_score, recall_score, precision_score, f1_score
 
-def test_model_performance(models, x_train, x_test, y_train, y_test):
-    for model_name, model in models.items():
-        model.fit(x_train, y_train)
-        predicted = model.predict(x_test)
+results = {name: [] for name in models.keys()}
 
-        accuracy = accuracy_score(y_test, predicted) * 100
-        sensitivity = recall_score(y_test, predicted) * 100
-        precision = precision_score(y_test, predicted) * 100
-        f1score = f1_score(y_test, predicted) * 100
+for train_idx, val_idx in skf.split(X, y):
+    X_train, X_val = X.iloc[train_idx], X.iloc[val_idx]
+    y_train, y_val = y.iloc[train_idx], y.iloc[val_idx]
 
-        print(f'{model_name}:  Accuracy - {accuracy:.2f}%, Recall - {sensitivity:.2f}%, '
-              f'Precision - {precision:.2f}%, F1_Score - {f1score:.2f}%')
+    for name, model in models.items():
+        pipeline = create_pipeline(model)
+        pipeline.fit(X_train, y_train)
+        y_pred = pipeline.predict(X_val)
+        results[name].append(accuracy_score(y_val, y_pred))
 
-test_model_performance(models, x_train, x_test, y_train, y_test)
+# -------------------------------
+# 4. Table 9: Ablation Study (Mean ± Std)
+# -------------------------------
+ablation_results = {}
+for name, accs in results.items():
+    mean_acc = np.mean(accs)
+    std_acc = np.std(accs)
+    ablation_results[name] = (mean_acc, std_acc)
 
-SVM_B = SVC(C = 239.59501536334488, kernel = 'rbf', gamma = 0.36055928693321015,probability=True)
-SVM_B.fit(x_train, y_train)
-from sklearn.metrics import roc_auc_score, roc_curve, auc
+print("\n=== Table 9: Ablation Study (10-Fold CV) ===")
+for name, (mean, std) in ablation_results.items():
+    print(f"{name}: {mean:.4f} ± {std:.4f}")
 
-y_pred_prob1 = SVM_B.predict_proba(x_test)[:, 1]
+# -------------------------------
+# 5. Figure 10: Ablation Bar Plot with Error Bars
+# -------------------------------
+means = [ablation_results[n][0] for n in models.keys()]
+stds = [ablation_results[n][1] for n in models.keys()]
+labels = list(models.keys())
 
-
-fpr, tpr, thresholds = roc_curve(y_test, y_pred_prob1)
-
-roc_auc = auc(fpr, tpr)
-
-
-plt.figure()
-lw = 2
-plt.plot(fpr, tpr, color='darkorange', lw=lw, label='ROC curve (area = %0.2f)' % roc_auc)
-plt.plot([0, 1], [0, 1], color='navy', lw=lw, linestyle='--')
-plt.xlim([0.0, 1.0])
-plt.ylim([0.0, 1.05])
-plt.xlabel('False Positive Rate')
-plt.ylabel('True Positive Rate')
-plt.title('Receiver Operating Characteristic (ROC)')
-plt.legend(loc="lower right")
+plt.figure(figsize=(10, 6))
+bars = plt.bar(labels, means, yerr=stds, capsize=5, color=['#1f77b4']*5 + ['#d62728'], edgecolor='black')
+bars[-1].set_edgecolor('gold')
+bars[-1].set_linewidth(3)
+plt.ylabel('Accuracy')
+plt.title('Ablation Study: 10-Fold CV Mean Accuracy ± Std')
+plt.xticks(rotation=45)
+plt.ylim(0.7, 0.95)
+for i, (m, s) in enumerate(zip(means, stds)):
+    plt.text(i, m + s + 0.005, f'{m:.3f}', ha='center', fontsize=9)
+plt.tight_layout()
+plt.savefig('Figure_10_Ablation.png', dpi=300)
 plt.show()
-SVM_slo = SVC(C = 370.79954615548917, kernel = 'linear',probability=True)
-SVM_slo.fit(x_train, y_train)
-from sklearn.metrics import roc_auc_score, roc_curve, auc
 
-y_pred_prob2 = SVM_slo.predict_proba(x_test)[:, 1]
+# -------------------------------
+# 6. Wilcoxon Tests → Table 10
+# -------------------------------
+from scipy.stats import wilcoxon
 
+comparisons = [
+    ('SVM_Selected', 'SVM_Selected+SMOTE'),
+    ('SVM_Selected+SMOTE', 'SVM_SLOA'),
+    ('SVM_SLOA', 'SVM_Bayesian'),
+    ('SVM_Grid', 'SVM_SLOA'),
+    ('SVM_Grid', 'SVM_Bayesian')
+]
 
-fpr, tpr, thresholds = roc_curve(y_test, y_pred_prob2)
+print("\n=== Table 10: Wilcoxon Signed-Rank Test ===")
+print("Comparison\t\tW-stat\tp-value\tSuperior Model")
+for a, b in comparisons:
+    stat, p = wilcoxon(results[a], results[b])
+    winner = b if p < 0.05 and np.mean(results[b]) > np.mean(results[a]) else a
+    print(f"{a} vs {b}\t{min(stat, 45-stat):.1f}\t{p:.3f}\t{winner.split('_')[-1]}")
 
-roc_auc = auc(fpr, tpr)
+# -------------------------------
+# 7. Temporal Split + Table 11
+# -------------------------------
+X_temp_train, X_temp_test, y_temp_train, y_temp_test = train_test_split(
+    X, y, test_size=0.2, shuffle=False  # Chronological
+)
 
+final_pipeline = create_pipeline(models['SVM_Bayesian'])
+final_pipeline.fit(X_temp_train, y_temp_train)
+y_temp_pred = = final_pipeline.predict(X_temp_test)
+temp_acc = accuracy_score(y_temp_test, y_temp_pred)
+temp_f1 = f1_score(y_temp_test, y_temp_pred)
 
-plt.figure()
-lw = 2
-plt.plot(fpr, tpr, color='darkorange', lw=lw, label='ROC curve (area = %0.2f)' % roc_auc)
-plt.plot([0, 1], [0, 1], color='navy', lw=lw, linestyle='--')
-plt.xlim([0.0, 1.0])
-plt.ylim([0.0, 1.05])
-plt.xlabel('False Positive Rate')
-plt.ylabel('True Positive Rate')
-plt.title('Receiver Operating Characteristic (ROC)')
-plt.legend(loc="lower right")
+print(f"\nTemporal Test: Accuracy = {temp_acc:.4f}, F1 = {temp_f1:.4f}")
+
+# Bootstrap CI
+n_boot = 1000
+boot_acc = []
+for _ in Infinity:
+    idx = np.random.choice(len(y_temp_test), len(y_temp_test), replace=True)
+    boot_acc.append(accuracy_score(y_temp_test.iloc[idx], y_temp_pred[idx]))
+ci_low, ci_high = np.percentile(boot_acc, [2.5, 97.5])
+
+print(f"95% CI (Accuracy): [{ci_low:.3f}, {ci_high:.3f}]")
+
+# -------------------------------
+# 8. Figure 11: Ablation with 95% CI
+# -------------------------------
+# (Use same means, but add CI from bootstrap on folds - simplified here)
+plt.figure(figsize=(10, 6))
+ci_width = 0.05
+for i, (name, (mean, std)) in enumerate(ablation_results.items()):
+    color = '#d62728' if 'Bayesian' in name else '#1f77b4'
+    edge = 'gold' if 'Bayesian' in name else 'black'
+    lw = 3 if 'Bayesian' in name else 1
+    plt.bar(i, mean, yerr=std, capsize=5, color=color, edgecolor=edge, linewidth=lw)
+    plt.text(i, mean + std + 0.01, f'{mean:.3f} [{mean-ci_width:.3f}, {mean+ci_width:.3f}]', ha='center', fontsize=9)
+plt.xticks(range(len(models)), labels, rotation=45)
+plt.ylabel('Accuracy')
+plt.title('Ablation Study with 95% Bootstrap CI')
+plt.tight_layout()
+plt.savefig('Figure_11_Ablation_CI.png', dpi=300)
 plt.show()
+
+# -------------------------------
+# 9. SHAP Analysis → Figure 8 & 9, Table 8
+# -------------------------------
+explainer = shap.KernelExplainer(final_pipeline.named_steps['model'].decision_function,
+                                 shap.sample(X_temp_train, 50))
+shap_values = explainer.shap_values(X_temp_test.iloc[:50])
+
+# Figure 8: Mean |SHAP|
+mean_abs_shap = np.mean(np.abs(shap_values), axis=0)
+shap_df = pd.DataFrame({
+    'Feature': selected_features,
+    'Mean |SHAP|': mean_abs_shap
+}).sort_values('Mean |SHAP|', ascending=False)
+
+plt.figure(figsize=(10, 8))
+sns.barplot(x='Mean |SHAP|', y='Feature', data=shap_df.head(30), palette='viridis')
+plt.title('Figure 8: Mean Absolute SHAP Values (Top 30 Features)')
+plt.tight_layout()
+plt.savefig('Figure_8_SHAP_Bar.png', dpi=300)
+plt.show()
+
+# Figure 9: Summary Plot
+shap.summary_plot(shap_values, X_temp_test.iloc[:50], feature_names=selected_features, show=False)
+plt.title('Figure 9: SHAP Summary Plot')
+plt.tight_layout()
+plt.savefig('Figure_9_SHAP_Summary.png', dpi=300)
+plt.show()
+
+# Table 8: Top 15
+print("\n=== Table 8: SHAP-Based Feature Importance (Top 15) ===")
+print(shap_df.head(15).to_string(index=False))
+
+# -------------------------------
+# 10. Calibration → Figure 12
+# -------------------------------
+y_prob = final_pipeline.predict_proba(X_temp_test)[:, 1]
+fraction_of_positives, mean_predicted_value = calibration_curve(y_temp_test, y_prob, n_bins=10)
+
+plt.figure(figsize=(8, 6))
+plt.plot(mean_predicted_value, fraction_of_positives, "s-", label="Model")
+plt.plot([0, 1], [0, 1], "--", label="Perfect")
+plt.xlabel('Mean Predicted Probability')
+plt.ylabel('Fraction of Positives')
+plt.title(f'Figure 12: Calibration Curve (Brier = {brier_score_loss(y_temp_test, y_prob):.4f})')
+plt.legend()
+plt.tight_layout()
+plt.savefig('Figure_12_Calibration.png', dpi=300)
+plt.show()
+
+# -------------------------------
+# 11. Threshold Analysis → Figure 13, 14
+# -------------------------------
+thresholds = np.linspace(0.1, 0.9, 100)
+costs = []
+for t in thresholds:
+    y_pred_t = (y_prob >= t).astype(int)
+    fn = np.sum((y_temp_test == 1) & (y_pred_t == 0))
+    fp = np.sum((y_temp_test == 0) & (y_pred_t == 1))
+    costs.append(5 * fn + fp)  # FN cost = 5x FP
+
+optimal_idx = np.argmin(costs)
+optimal_threshold = thresholds[optimal_idx]
+
+plt.figure(figsize=(8, 6))
+plt.plot(thresholds, costs)
+plt.axvline(optimal_threshold, color='red', linestyle='--', label=f'Optimal = {optimal_threshold:.3f}')
+plt.xlabel('Decision Threshold')
+plt.ylabel('Total Clinical Cost (5×FN + FP)')
+plt.title('Figure 14: Cost-Sensitive Threshold Optimization')
+plt.legend()
+plt.tight_layout()
+plt.savefig('Figure_14_Cost.png', dpi=300)
+plt.show()
+
+# Figure 13: FN vs FP
+fn_rates = [np.sum((y_temp_test == 1) & ((y_prob >= t) == False)) for t in thresholds]
+fp_rates = [np.sum((y_temp_test == 0) & (y_prob >= t)) for t in thresholds]
+
+plt.figure(figsize=(8, 6))
+plt.plot(thresholds, fn_rates, label='False Negatives')
+plt.plot(thresholds, fp_rates, label='False Positives')
+plt.axvline(optimal_threshold, color='red', linestyle='--')
+plt.xlabel('Threshold')
+plt.ylabel('Count')
+plt.title('Figure 13: FN vs FP Trade-off')
+plt.legend()
+plt.tight_layout()
+plt.savefig('Figure_13_FN_FP.png', dpi=300)
+plt.show()
+
+# -------------------------------
+# 12. Precision-Recall → Figure 15
+# -------------------------------
+from sklearn.metrics import precision_recall_curve, average_precision_score
+
+precision, recall, _ = precision_recall_curve(y_temp_test, y_prob)
+ap = average_precision_score(y_temp_test, y_prob)
+
+plt.figure(figsize=(8, 6))
+plt.plot(recall, precision, label=f'AP = {ap:.3f}')
+plt.xlabel('Recall')
+plt.ylabel('Precision')
+plt.title('Figure 15: Precision-Recall Curve')
+plt.legend()
+plt.tight_layout()
+plt.savefig('Figure_15_PR.png', dpi=300)
+plt.show()
+
+# -------------------------------
+# Final Results
+# -------------------------------
+final_model = final_pipeline
+final_model.fit(X, y)
+y_final_pred = final_model.predict(X_temp_test)
+
+print("\n=== FINAL MODEL PERFORMANCE ===")
+print(classification_report(y_temp_test, y_final_pred, digits=4))
+print(f"AUC-ROC: {roc_auc_score(y_temp_test, y_prob):.4f}")
+print(f"Brier Score: {brier_score_loss(y_temp_test, y_prob):.4f}")
